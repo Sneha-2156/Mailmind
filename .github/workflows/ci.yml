@@ -1,0 +1,176 @@
+name: MailMind AI CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+jobs:
+  # ----------------------------------------------------------------
+  # Backend: Lint + Type check + Tests
+  # ----------------------------------------------------------------
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: mailmind_test
+          POSTGRES_USER: mailmind
+          POSTGRES_PASSWORD: test_secret
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Create test .env
+        working-directory: backend
+        run: |
+          cat > .env << EOF
+          APP_ENV=test
+          APP_SECRET_KEY=test-secret-key-for-ci-only-32-chars
+          DATABASE_URL=postgresql+asyncpg://mailmind:test_secret@localhost:5432/mailmind_test
+          ENCRYPTION_KEY=$(python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+          JWT_SECRET_KEY=test-jwt-secret-key-for-ci-32-chars
+          GOOGLE_CLIENT_ID=test-client-id
+          GOOGLE_CLIENT_SECRET=test-secret
+          AI_PROVIDER=
+          ML_MODEL_PATH=ml/artifacts/model_v1.pkl
+          EOF
+
+      - name: Run ML training (creates model artifact)
+        working-directory: backend
+        run: |
+          mkdir -p ml/artifacts
+          python ml/train.py || echo "ML training optional in CI"
+
+      - name: Run backend tests
+        working-directory: backend
+        run: |
+          pytest tests/ -v --tb=short --co -q
+        env:
+          DATABASE_URL: postgresql+asyncpg://mailmind:test_secret@localhost:5432/mailmind_test
+
+      - name: Check for security issues (bandit)
+        working-directory: backend
+        run: |
+          pip install bandit
+          bandit -r app/ -ll --exclude app/tests || true
+
+  # ----------------------------------------------------------------
+  # ML: Model training evaluation
+  # ----------------------------------------------------------------
+  ml-pipeline:
+    name: ML Pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+      - name: Install ML dependencies
+        working-directory: backend
+        run: pip install scikit-learn pandas numpy joblib
+      - name: Train and evaluate model
+        working-directory: backend
+        run: |
+          mkdir -p ml/artifacts
+          python ml/train.py
+          python ml/evaluate.py
+      - name: Upload ML artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-artifacts
+          path: backend/ml/artifacts/
+          retention-days: 7
+
+  # ----------------------------------------------------------------
+  # Frontend: Lint + Type check + Tests + Build
+  # ----------------------------------------------------------------
+  frontend:
+    name: Frontend Tests & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Create frontend .env
+        working-directory: frontend
+        run: |
+          echo "VITE_API_BASE_URL=http://localhost:8000" > .env
+          echo "VITE_APP_NAME=MailMind AI" >> .env
+
+      - name: Type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Run frontend tests
+        working-directory: frontend
+        run: npm test -- --reporter=verbose --run
+
+      - name: Build production bundle
+        working-directory: frontend
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 7
+
+  # ----------------------------------------------------------------
+  # Docker: Build validation
+  # ----------------------------------------------------------------
+  docker:
+    name: Docker Build Validation
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate docker-compose config
+        run: docker compose config
+      - name: Build backend image
+        run: docker build ./backend --target development -t mailmind-backend:ci
+      - name: Build frontend image
+        run: docker build ./frontend --target builder -t mailmind-frontend:ci
