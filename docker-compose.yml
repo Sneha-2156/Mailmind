@@ -1,0 +1,107 @@
+version: "3.9"
+
+# ============================================================
+# MailMind AI — Docker Compose
+# Local development & production-equivalent environment
+# ============================================================
+
+services:
+  # ----------------------------------------------------------
+  # PostgreSQL 16 Database
+  # ----------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: mailmind_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-mailmind_db}
+      POSTGRES_USER: ${DATABASE_USER:-mailmind}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-mailmind_secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-mailmind} -d ${DATABASE_NAME:-mailmind_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mailmind_net
+
+  # ----------------------------------------------------------
+  # FastAPI Backend
+  # ----------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: mailmind_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${DATABASE_USER:-mailmind}:${DATABASE_PASSWORD:-mailmind_secret}@postgres:5432/${DATABASE_NAME:-mailmind_db}
+      APP_ENV: ${APP_ENV:-development}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+      - ml_artifacts:/app/ml/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             ([ -f ml/artifacts/model_v1.pkl ] || python -m ml.train) &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-level info"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - mailmind_net
+
+  # ----------------------------------------------------------
+  # Vite + React Frontend (dev server)
+  # ----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: mailmind_frontend
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:${APP_PORT:-8000}
+      VITE_APP_NAME: MailMind AI
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - mailmind_net
+
+# ----------------------------------------------------------
+# Named Volumes
+# ----------------------------------------------------------
+volumes:
+  postgres_data:
+    name: mailmind_postgres_data
+  ml_artifacts:
+    name: mailmind_ml_artifacts
+
+# ----------------------------------------------------------
+# Networks
+# ----------------------------------------------------------
+networks:
+  mailmind_net:
+    name: mailmind_network
+    driver: bridge

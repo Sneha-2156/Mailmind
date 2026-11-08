@@ -1,0 +1,144 @@
+{
+  "n_samples": 451,
+  "cv": "5-fold x3 repeats, stratified",
+  "models": {
+    "majority_baseline": {
+      "accuracy_mean": 0.1109,
+      "accuracy_std": 0.0005,
+      "f1_macro_mean": 0.0222,
+      "f1_macro_std": 0.0001
+    },
+    "tfidf+logreg": {
+      "accuracy_mean": 0.7613,
+      "accuracy_std": 0.031,
+      "f1_macro_mean": 0.759,
+      "f1_macro_std": 0.0294
+    },
+    "tfidf+linearsvc": {
+      "accuracy_mean": 0.7635,
+      "accuracy_std": 0.0305,
+      "f1_macro_mean": 0.7568,
+      "f1_macro_std": 0.0276
+    },
+    "tfidf+calibrated_linearsvc (shipped)": {
+      "accuracy_mean": 0.7635,
+      "accuracy_std": 0.0277,
+      "f1_macro_mean": 0.7604,
+      "f1_macro_std": 0.0258
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "Academic",
+      "Administration",
+      "Campus Service",
+      "Career and Opportunity",
+      "Financial Services",
+      "Miscellaneous",
+      "Scholarship",
+      "Service Notification",
+      "Skill Development"
+    ],
+    "matrix": [
+      [
+        32,
+        3,
+        3,
+        0,
+        1,
+        0,
+        0,
+        2,
+        1
+      ],
+      [
+        6,
+        29,
+        8,
+        0,
+        6,
+        1,
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        8,
+        32,
+        0,
+        1,
+        7,
+        0,
+        3,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        48,
+        0,
+        1,
+        0,
+        1,
+        1
+      ],
+      [
+        0,
+        8,
+        1,
+        0,
+        38,
+        0,
+        4,
+        0,
+        0
+      ],
+      [
+        0,
+        4,
+        11,
+        2,
+        0,
+        31,
+        0,
+        1,
+        2
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        2,
+        1,
+        47,
+        0,
+        1
+      ],
+      [
+        2,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        45,
+        1
+      ],
+      [
+        2,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        1,
+        47
+      ]
+    ]
+  }
+}
